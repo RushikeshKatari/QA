@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build:client",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

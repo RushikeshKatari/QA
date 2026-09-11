@@ -60,7 +60,10 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server and initialize database
+export { app };
+
+// Start server and initialize database for local development only. Vercel
+// imports the exported Express app through api/index.js instead.
 async function startServer() {
   try {
     console.log('Initializing database connection...');
@@ -79,4 +82,5 @@ async function startServer() {
   }
 }
 
-startServer();
+const isDirectExecution = process.argv[1] && path.resolve(process.argv[1]) === __filename;
+if (isDirectExecution && !process.env.VERCEL) startServer();
