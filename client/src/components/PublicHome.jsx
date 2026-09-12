@@ -55,7 +55,28 @@ export default function PublicHome({ onNavigateAdmin }) {
 
   const onSearchSubmit = (e) => {
     e.preventDefault();
-    handleSearch(searchQuery, 1);
+    if (!searchQuery.trim()) return;
+    setIsSubmitting(true);
+    setErrorMessage('');
+    fetch(`/api/questions/search?q=${encodeURIComponent(searchQuery)}&page=1&limit=10`).then(async (searchRes) => {
+      const searchData = await searchRes.json();
+      if (searchData.success && searchData.total > 0) {
+        setSearchResults(searchData.items || []);
+        setTotalPages(searchData.totalPages || 1);
+        setSearchPage(1);
+        return;
+      }
+      const addRes = await fetch('/api/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: searchQuery })
+      });
+      const data = await addRes.json();
+      if (!addRes.ok || !data.success) throw new Error(data.error || 'Unable to find or add the question.');
+      setSubmissionResult(data);
+      await fetchStats();
+      await handleSearch(searchQuery, 1);
+    }).catch((err) => setErrorMessage(err.message)).finally(() => setIsSubmitting(false));
   };
 
   const handleFileChange = (e) => {
@@ -200,7 +221,7 @@ export default function PublicHome({ onNavigateAdmin }) {
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1">
-                    <div className="text-xs font-semibold text-slate-400">Question #{q.id}</div>
+                    <div className="text-xs font-semibold text-slate-400">Q{String(q.id).padStart(3, '0')}</div>
                     <h3 className="text-base sm:text-lg font-medium text-white leading-relaxed">
                       {q.question_text}
                     </h3>
@@ -289,7 +310,7 @@ export default function PublicHome({ onNavigateAdmin }) {
       )}
 
       {/* FIND OR ADD: paste/upload uses the same clean, deduplicate, and resolve flow */}
-      {true && (
+      {false && (
       <section className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 sm:p-8 shadow-xl backdrop-blur-sm">
         <div className="border-b border-slate-700 pb-5 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>

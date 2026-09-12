@@ -223,14 +223,23 @@ export default function AdminDashboard({ onNavigateHome }) {
   // Copy standard prompt template to clipboard
   const handleCopyPromptTemplate = () => {
     const template = `Please solve the questions and output the answers strictly in the following format:
-[What is the capital of India?]{a delhi}
-[Which countries are in Europe?]{a france , c germany}
+Q001
+
+[What is the capital of India?]
+
+{a Delhi}
+
+Q002
+
+[Which countries are in Europe?]
+
+{a France, c Germany}
 
 Formatting Rules:
-- Put the complete question inside square brackets and append the answer immediately after it in curly brackets: [question text]{answer}
-- For single-choice questions, write the letter key and option text: { a option_text } or { b option_text }
-- For multiple-choice questions with multiple correct options, separate them with commas: { a option_text , c option_text }
-- Output ONLY [question]{answer} lines in sequential order. Do not include question numbers or conversational text.`;
+- Copy each question_id exactly as provided.
+- Put the complete question inside [ ] and the answer inside { } on the next line.
+- Preserve option letters and option text exactly as provided.
+- Output only the required question blocks, without explanations or extra numbering.`;
 
     navigator.clipboard.writeText(template);
     setCopiedPrompt(true);
@@ -248,19 +257,21 @@ Formatting Rules:
 
     const formattedQuestions = selected.map((q) => {
       const opts = (q.options || []).map((o) => `   ${o.key}. ${o.text}`).join('\n');
-      return `[${q.question_text}]${opts ? `\n${opts}` : ''}`;
+      return `Q${String(q.id).padStart(3, '0')}\n\n[${q.question_text}]${opts ? `\n${opts}` : ''}`;
     }).join('\n\n');
 
     const promptText = `Please solve the following ${selected.length} questions and output each answer strictly in this format:
-[question text]{a option_text}
-[question text]{a option_text , c option_text}
+Q001
+[question text]
+{a option_text}
 
 Rules:
-- Put the complete question inside square brackets and append the answer immediately after it in curly braces: [question text]{answer}
-- For single choice: { key option_text } e.g. { a delhi }
-- For multiple choices: { key option_text , key option_text } e.g. { a delhi , c canada }
-- Provide exactly ${selected.length} [question]{answer} line(s) in order, one per question.
-- Do not add numbering, IDs, explanations, or conversational filler.
+- Always copy the provided question ID exactly and use it for the matching question.
+- Put the complete question inside [ ] and the answer inside { } on the next line.
+- For single choice: {a option_text}; for multiple choices: {a option_text, c option_text}.
+- Preserve option letters and text exactly as provided.
+- Provide exactly ${selected.length} question blocks in order.
+- Output only the required question blocks, with no explanations or extra numbering.
 
 Questions to answer:
 ${formattedQuestions}`;
@@ -277,12 +288,12 @@ ${formattedQuestions}`;
       return;
     }
 
-    const formattedQuestions = pendingQuestions.map((q, idx) => {
+    const formattedQuestions = pendingQuestions.map((q) => {
       const opts = (q.options || []).map((o) => `   ${o.key}. ${o.text}`).join('\n');
-      return `Question ${idx + 1} (ID: #${q.id}):\n${q.question_text}${opts ? `\n${opts}` : ''}`;
+      return `Q${String(q.id).padStart(3, '0')}\n\n[${q.question_text}]${opts ? `\n${opts}` : ''}`;
     }).join('\n\n');
 
-    const promptText = `Please solve the questions and output the answers strictly in the following format:\n\n[ question text ] { a option_text }\n[ question text ] { b option_text }\n[ question text ] { a option_text , c option_text }\n\nFormatting Rules:\n\n- Clean each question by removing question numbers, IDs, status labels, UI text, and other unnecessary information.\n- Put the cleaned question inside square brackets: [ question text ]\n- Put the answer immediately after the question in curly brackets: { ... }\n- For single-choice questions, write the letter key and complete option text: { a option_text } or { b option_text }\n- For multiple-choice questions with multiple correct options, separate the correct answers with commas: { a option_text , c option_text }\n- Keep the questions and answers in the exact same sequential order as provided.\n- Do not add explanations, commentary, headings, or extra text.\n- Output ONLY the [ question ] { answer } lines.\n\nQuestions to answer:\n${formattedQuestions}`;
+    const promptText = `Please solve the questions using exactly this structure:\n\nQ001\n\n[question text]\n\n{a option_text}\n\nRules:\n- Copy each provided question_id exactly (for example Q001).\n- Put the complete question inside [ ].\n- Put the answer inside { } on the next line.\n- Preserve option letters and option text exactly as provided.\n- Process questions in order and output only these blocks.\n\nQuestions to answer:\n${formattedQuestions}`;
 
     navigator.clipboard.writeText(promptText);
     setCopiedAllQuestions(true);
@@ -293,10 +304,16 @@ ${formattedQuestions}`;
   // Apply pattern answers to selected questions
   const handleApplyPattern = async (e) => {
     e.preventDefault();
-    const isAnsweredQuestionImport = /\[[\s\S]*?\]\s*\{[^{}]+\}/.test(patternInput);
+    const hasAnsweredQuestionBlock = /\[[\s\S]*?\]\s*\n?\s*\{[^{}]+\}/.test(patternInput);
+    const isAnsweredQuestionImport = /(?:^|\n)\s*\(?[A-Za-z]*\d+\)?\s*\n\s*\[[\s\S]*?\]\s*\n\s*\{[^{}]+\}/.test(patternInput);
+
+    if (hasAnsweredQuestionBlock && !isAnsweredQuestionImport) {
+      alert('Every answered question must include its question ID, for example:\n\nQ001\n\n[Question text]\n\n{a option_text}');
+      return;
+    }
 
     if (isAnsweredQuestionImport) {
-      if (!confirm('This will remove all current pending questions and add these entries as answered. Continue?')) return;
+      if (!confirm('This will mark the matching question IDs as answered and remove them from the pending list. Continue?')) return;
 
       setIsImportingAnsweredQuestions(true);
       try {
@@ -323,7 +340,7 @@ ${formattedQuestions}`;
         setPatternInput('');
         setSelectedQuestionIds([]);
         setActiveTab('all');
-        showNotice(`✓ Imported ${data.importedCount} new answered question${data.importedCount === 1 ? '' : 's'}, skipped ${data.skippedCount || 0} existing question${data.skippedCount === 1 ? '' : 's'}, and removed ${data.removedPendingCount} pending question${data.removedPendingCount === 1 ? '' : 's'}.`);
+        showNotice(`✓ Answered ${data.answeredCount || data.importedCount || 0} question${(data.answeredCount || data.importedCount || 0) === 1 ? '' : 's'} by question ID.`);
         await fetchAdminStats();
         await fetchPendingQuestions();
         await fetchAllQuestions();
@@ -715,7 +732,7 @@ ${formattedQuestions}`;
                     rows={3}
                     value={patternInput}
                     onChange={(e) => setPatternInput(e.target.value)}
-                    placeholder={'[ What is the capital of India? ] { b Delhi }\n[ Which planet is red? ] { b Mars }'}
+                    placeholder={'Q001\n\n[ What is the capital of India? ]\n\n{ b Delhi }\n\nQ002\n\n[ Which planet is red? ]\n\n{ b Mars }'}
                     className="w-full p-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-600"
                   ></textarea>
                 </div>

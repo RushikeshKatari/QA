@@ -23,6 +23,7 @@ console.log('--- Running Parser & Normalizer Tests ---');
 
   assert.strictEqual(areNearDuplicateQuestions(original, typo), true);
   assert.strictEqual(areNearDuplicateQuestions(original, different), false);
+  assert.strictEqual(areNearDuplicateQuestions('Who is ninja', 'Who is a ninja'), true);
   console.log('✓ Near-duplicate test passed: minor character changes are detected');
 }
 
@@ -181,6 +182,18 @@ Formic
     { key: 'C', text: 'Formic' }, { key: 'D', text: 'Anaemic' }
   ]);
   console.log('✓ Escaped numbered question and option markers normalize correctly');
+}
+
+{
+  const parsed = parseQuestions('Who is a baaka? Gurucharan Rushikesh both');
+  assert.strictEqual(parsed.length, 1);
+  assert.strictEqual(parsed[0].question_text, 'Who is a baaka?');
+  assert.deepStrictEqual(parsed[0].options, [
+    { key: 'A', text: 'Gurucharan' },
+    { key: 'B', text: 'Rushikesh' },
+    { key: 'C', text: 'both' }
+  ]);
+  console.log('✓ Inline unlabeled options after a question mark are separated');
 }
 
 {

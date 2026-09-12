@@ -279,60 +279,45 @@ router.post('/import-answered', requireAdmin, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Paste one or more [question] {answer} entries.' });
     }
 
-    const entryPattern = /\[\s*([\s\S]*?)\s*\]\s*\{\s*([^{}]+?)\s*\}/g;
+    const entryPattern = /(?:^|\n)\s*\(?([A-Za-z]*\d+)\)?\s*\n\s*\[\s*([\s\S]*?)\s*\]\s*\n\s*\{\s*([^{}]+?)\s*\}/g;
     const entries = [];
     let match;
     while ((match = entryPattern.exec(content)) !== null) {
-      const questionText = cleanQuestionText(match[1]);
-      const answer = match[2].replace(/\s+/g, ' ').trim();
-      if (questionText && answer) entries.push({ questionText, answer });
+      const questionId = match[1].toUpperCase();
+      const questionText = cleanQuestionText(match[2]);
+      const answer = match[3].replace(/\s+/g, ' ').trim();
+      if (questionText && answer) entries.push({ questionId, questionText, answer });
     }
 
     if (entries.length === 0) {
       return res.status(400).json({ success: false, error: 'No valid [question] {answer} entries found.' });
     }
 
-    // Preserve options from the pending question being answered. The import
-    // format contains the stem and answer, not the option list.
-    const pendingRows = (await query("SELECT normalized_text, options FROM questions WHERE answer_status = 'pending'")).rows;
-    const pendingOptions = new Map(pendingRows.map(row => {
-      let options = row.options || [];
-      if (typeof options === 'string') { try { options = JSON.parse(options); } catch (_) { options = []; } }
-      return [row.normalized_text, Array.isArray(options) ? options : []];
-    }));
-
-    const removed = await query("DELETE FROM questions WHERE answer_status = 'pending'");
     const imported = [];
     let skippedCount = 0;
 
     for (const entry of entries) {
       const normalizedText = normalizeQuestion(entry.questionText);
       const questionHash = canonicalHash(normalizedText);
-      const options = pendingOptions.get(normalizedText) || [];
-      const exactAnswered = await query(
-        "SELECT id FROM questions WHERE normalized_text = $1 AND answer_status = 'answered' LIMIT 1",
-        [normalizedText]
-      );
-      const existingAnswered = exactAnswered.rows.length > 0
-        ? exactAnswered
-        : {
-            rows: (await query("SELECT id, normalized_text FROM questions WHERE answer_status = 'answered'")).rows
-              .filter(row => areNearDuplicateQuestions(normalizedText, row.normalized_text))
-              .slice(0, 1)
-          };
-
-      if (existingAnswered.rows.length > 0) {
+      const numericId = Number(entry.questionId.replace(/^\D+/, ''));
+      if (!Number.isInteger(numericId) || numericId < 1) {
+        return res.status(400).json({ success: false, error: `Invalid question_id: ${entry.questionId}` });
+      }
+      const existing = await query('SELECT id, answer_status FROM questions WHERE id = $1', [numericId]);
+      if (!existing.rows.length) {
+        return res.status(400).json({ success: false, error: `Question ${entry.questionId} was not found.` });
+      }
+      if (existing.rows[0].answer_status === 'answered') {
         skippedCount += 1;
       } else {
-        const inserted = await query(
-          `INSERT INTO questions
-           (question_text, normalized_text, original_text, display_question, canonical_question, question_hash,
-            options, correct_answer, answer_status, times_seen, source, created_at, updated_at, answered_at)
-           VALUES ($1, $2, $1, $1, $2, $3, $4, $5, 'answered', 1, 'admin_answer_import', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-           RETURNING id`,
-          [entry.questionText, normalizedText, questionHash, JSON.stringify(options), entry.answer]
+        const updated = await query(
+          `UPDATE questions SET question_text = $1, normalized_text = $2, display_question = $1,
+             canonical_question = $2, question_hash = $3, correct_answer = $4,
+             answer_status = 'answered', answered_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $5 AND answer_status = 'pending' RETURNING id`,
+          [entry.questionText, normalizedText, questionHash, entry.answer, numericId]
         );
-        imported.push(inserted.rows[0].id);
+        if (updated.rows.length) imported.push(updated.rows[0].id);
       }
     }
 
@@ -340,7 +325,8 @@ router.post('/import-answered', requireAdmin, async (req, res) => {
       success: true,
       importedCount: imported.length,
       skippedCount,
-      removedPendingCount: removed.rowCount || 0
+      answeredCount: imported.length,
+      pendingRemaining: Number((await query("SELECT COUNT(*)::int AS count FROM questions WHERE answer_status = 'pending'")).rows[0].count)
     });
   } catch (err) {
     console.error('Error importing answered questions:', err);

@@ -14,6 +14,13 @@ function sentenceCaseIfAllCaps(value) {
   return lower[0].toUpperCase() + lower.slice(1);
 }
 
+function splitInlineOptions(text) {
+  const match = String(text || '').match(/^(.*?\?)\s+(.+)$/);
+  if (!match) return null;
+  const values = match[2].trim().split(/\s+/).filter(Boolean);
+  return values.length >= 2 && values.length <= 4 ? { question: match[1].trim(), options: values } : null;
+}
+
 /** Removes only explicit leading labels/numbering; body words are not guessed at. */
 export function cleanQuestionText(text) {
   let value = collapse(String(text || '').replace(/&(nbsp|#0*160|#x0*a0);/gi, ' ').replace(/<[^>]*>/g, ''));
@@ -26,6 +33,10 @@ export function cleanQuestionText(text) {
 export function normalizeQuestion(text) {
   return cleanQuestionText(text).normalize('NFKC').toLocaleLowerCase('en-US')
     .replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeForSimilarity(text) {
+  return normalizeQuestion(text).replace(/\b(?:a|an|the)\b/gu, ' ').replace(/\s+/g, ' ').trim();
 }
 
 export function validateQuestion(displayQuestion, options = [], sourceFormat = 'text') {
@@ -80,7 +91,23 @@ export function parsePlainText(content) {
       }
     }
     const start = trimmed.match(QUESTION_START);
-    if (start) { if (questionLines.length) commit(); questionLines.push(start[1]); continue; }
+    if (start) {
+      if (questionLines.length) commit();
+      const inline = splitInlineOptions(start[1]);
+      if (inline) {
+        questionLines.push(inline.question);
+        options = inline.options.map((text, index) => ({ key: String.fromCharCode(65 + index), text }));
+      } else questionLines.push(start[1]);
+      continue;
+    }
+    if (!questionLines.length) {
+      const inline = splitInlineOptions(trimmed);
+      if (inline) {
+        questionLines.push(inline.question);
+        options = inline.options.map((text, index) => ({ key: String.fromCharCode(65 + index), text }));
+        continue;
+      }
+    }
     if (!questionLines.length) questionLines.push(trimmed);
     else if (options.length || /[?]$/.test(questionLines.at(-1))) {
       // A question ending in '?' followed by four bare lines is the common
@@ -115,7 +142,7 @@ export function parseQuestions(content, format = 'text') {
 }
 
 export function areNearDuplicateQuestions(first, second) {
-  const a = normalizeQuestion(first), b = normalizeQuestion(second); if (!a || !b) return false; if (a === b) return true;
+  const a = normalizeForSimilarity(first), b = normalizeForSimilarity(second); if (!a || !b) return false; if (a === b) return true;
   const max = Math.max(a.length, b.length); if (max < 12 || Math.abs(a.length - b.length) > Math.ceil(max * .1)) return false;
   let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i++) { const cur = [i]; for (let j = 1; j <= b.length; j++) cur[j] = Math.min(cur[j - 1] + 1, prev[j] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; }
