@@ -21,6 +21,19 @@ function splitInlineOptions(text) {
   return values.length >= 2 && values.length <= 4 ? { question: match[1].trim(), options: values } : null;
 }
 
+function splitInlineLabeledOptions(text) {
+  const marker = String(text || '').search(/\s+Answer\s+[A-Da-d][.)]\s*/i);
+  if (marker < 0) return null;
+  const body = String(text).slice(0, marker).replace(/\s+Question\s+\d+\s*$/i, '').trim();
+  const optionText = String(text).slice(marker).replace(/^\s+Answer\s+/i, '');
+  const matches = [...optionText.matchAll(/(?:^|\s)([A-Da-d])[.)]\s*(.*?)(?=\s+[A-Da-da-d][.)]\s+|$)/g)];
+  if (!body || matches.length < 2) return null;
+  return {
+    question: body,
+    options: matches.map(match => ({ key: match[1].toUpperCase(), text: match[2].trim() })).filter(option => option.text)
+  };
+}
+
 /** Removes only explicit leading labels/numbering; body words are not guessed at. */
 export function cleanQuestionText(text) {
   let value = collapse(String(text || '').replace(/&(nbsp|#0*160|#x0*a0);/gi, ' ').replace(/<[^>]*>/g, ''));
@@ -73,10 +86,17 @@ export function parsePlainText(content) {
   const result = []; let questionLines = []; let options = [];
   const commit = () => { if (questionLines.length) result.push({ original_text: [...questionLines, ...options.map(o => `${o.key}. ${o.text}`)].join('\n'), question_text: questionLines.join(' ').trim(), options }); questionLines = []; options = []; };
   for (const line of String(content || '').replace(/\r\n?/g, '\n').split('\n')) {
-    const trimmed = line.trim();
+    const trimmed = line.trim().replace(/^#{1,6}\s*/, '');
     // Timers, score counters, and pagination chrome can be injected by copied UI/PDF text.
     // Discard them before they can become the current question stem.
-    if (!trimmed || UI_ARTIFACT.test(trimmed) || ANSWER_LINE.test(trimmed)) continue;
+    if (!trimmed || UI_ARTIFACT.test(trimmed) || ANSWER_LINE.test(trimmed) || /^#?\d+\s*\**(?:ANSWERED|PENDING)\**\s*$/i.test(trimmed) || /^source\s*:/i.test(trimmed)) continue;
+    const inlineLabeled = splitInlineLabeledOptions(trimmed);
+    if (inlineLabeled) {
+      if (questionLines.length) commit();
+      questionLines.push(inlineLabeled.question);
+      options = inlineLabeled.options;
+      continue;
+    }
     const option = trimmed.match(OPTION_LINE);
     if (option && questionLines.length) { options.push({ key: (option[1] || option[2]).toUpperCase(), text: option[3] }); continue; }
     // Once a question has started, sequential 1)-4) lines are options. This

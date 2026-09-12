@@ -197,6 +197,17 @@ Formic
 }
 
 {
+  const parsed = parseQuestions('#### Which of the following is a psychological factor affecting consumer behavior? Question 10 Answer a. Family b. Motivation c. Income d. Culture\nAnswer: **b. Motivation**\nSource: paste');
+  assert.strictEqual(parsed.length, 1);
+  assert.strictEqual(parsed[0].question_text, 'Which of the following is a psychological factor affecting consumer behavior?');
+  assert.deepStrictEqual(parsed[0].options, [
+    { key: 'A', text: 'Family' }, { key: 'B', text: 'Motivation' },
+    { key: 'C', text: 'Income' }, { key: 'D', text: 'Culture' }
+  ]);
+  console.log('✓ Markdown answered-question exports separate inline A-D options');
+}
+
+{
   assert.strictEqual(prepareQuestion({ question_text: 'timer:00:03' }).valid, false);
   assert.strictEqual(prepareQuestion({ question_text: 'Who?' }).valid, false);
   console.log('✓ UI artifacts and uncertain short input are rejected');
