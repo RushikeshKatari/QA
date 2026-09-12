@@ -143,7 +143,7 @@ export default function PublicHome({ onNavigateAdmin }) {
 
       {/* Find-or-add is handled by the submission endpoint: it searches first,
           returns an existing match, or creates a pending question. */}
-      {false && (
+      {true && (
         <section className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 sm:p-8 shadow-xl backdrop-blur-sm animate-fade-in">
           <div className="text-center space-y-3 mb-8">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-semibold uppercase tracking-wider">

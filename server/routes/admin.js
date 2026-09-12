@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { query } from '../db.js';
 import { requireAdmin, JWT_SECRET } from '../middleware/security.js';
 import { areNearDuplicateQuestions, cleanQuestionText, normalizeQuestion, parseAnswerPattern, parseQuestions, prepareQuestion } from '../parser.js';
+import { canonicalHash } from '../questionPipeline.js';
 
 const router = express.Router();
 
@@ -291,12 +292,23 @@ router.post('/import-answered', requireAdmin, async (req, res) => {
       return res.status(400).json({ success: false, error: 'No valid [question] {answer} entries found.' });
     }
 
+    // Preserve options from the pending question being answered. The import
+    // format contains the stem and answer, not the option list.
+    const pendingRows = (await query("SELECT normalized_text, options FROM questions WHERE answer_status = 'pending'")).rows;
+    const pendingOptions = new Map(pendingRows.map(row => {
+      let options = row.options || [];
+      if (typeof options === 'string') { try { options = JSON.parse(options); } catch (_) { options = []; } }
+      return [row.normalized_text, Array.isArray(options) ? options : []];
+    }));
+
     const removed = await query("DELETE FROM questions WHERE answer_status = 'pending'");
     const imported = [];
     let skippedCount = 0;
 
     for (const entry of entries) {
       const normalizedText = normalizeQuestion(entry.questionText);
+      const questionHash = canonicalHash(normalizedText);
+      const options = pendingOptions.get(normalizedText) || [];
       const exactAnswered = await query(
         "SELECT id FROM questions WHERE normalized_text = $1 AND answer_status = 'answered' LIMIT 1",
         [normalizedText]
@@ -314,10 +326,11 @@ router.post('/import-answered', requireAdmin, async (req, res) => {
       } else {
         const inserted = await query(
           `INSERT INTO questions
-           (question_text, normalized_text, options, correct_answer, answer_status, times_seen, source, created_at, updated_at, answered_at)
-           VALUES ($1, $2, '[]'::jsonb, $3, 'answered', 1, 'admin_answer_import', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+           (question_text, normalized_text, original_text, display_question, canonical_question, question_hash,
+            options, correct_answer, answer_status, times_seen, source, created_at, updated_at, answered_at)
+           VALUES ($1, $2, $1, $1, $2, $3, $4, $5, 'answered', 1, 'admin_answer_import', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
            RETURNING id`,
-          [entry.questionText, normalizedText, entry.answer]
+          [entry.questionText, normalizedText, questionHash, JSON.stringify(options), entry.answer]
         );
         imported.push(inserted.rows[0].id);
       }
